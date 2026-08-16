@@ -7,6 +7,7 @@ from docx import Document
 
 from backend.services.document_parser import (
     DocumentParsingError,
+    extract_document,
     extract_docx,
     extract_pdf,
 )
@@ -116,3 +117,26 @@ def test_extract_pdf_rejects_missing_file(tmp_path: Path) -> None:
 
     with pytest.raises(DocumentParsingError, match="does not exist"):
         extract_pdf(path)
+
+
+def test_extract_document_routes_docx(tmp_path: Path) -> None:
+    path = create_docx(
+        tmp_path / "candidate.docx",
+        ["Candidate Name", "Cloud Engineer"],
+    )
+
+    result = extract_document(path)
+
+    assert result.file_type == "docx"
+    assert result.filename == "candidate.docx"
+
+
+def test_extract_document_rejects_unsupported_file_type(tmp_path: Path) -> None:
+    path = tmp_path / "candidate.txt"
+    path.write_text("Plain text CV", encoding="utf-8")
+
+    with pytest.raises(
+        DocumentParsingError,
+        match="Unsupported document type",
+    ):
+        extract_document(path)

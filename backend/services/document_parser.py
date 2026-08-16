@@ -90,3 +90,20 @@ def extract_pdf(path: Path) -> ExtractedDocument:
         text=text,
         paragraph_count=len(pages),
     )
+
+
+def extract_document(path: Path) -> ExtractedDocument:
+    """Route a supported document to the correct parser."""
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".docx":
+        return extract_docx(path)
+
+    if suffix == ".pdf":
+        return extract_pdf(path)
+
+    raise DocumentParsingError(
+        f"Unsupported document type: {suffix or 'no extension'}. "
+        "Supported types are .docx and .pdf."
+    )
