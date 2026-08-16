@@ -7,8 +7,10 @@ from backend.models.ai import (
 )
 from backend.models.cv import CanonicalCV
 from backend.models.document import ExtractedDocument
+from backend.models.settings import AISettings
 
 __all__ = [
+    "AISettings",
     "AIUsage",
     "CVOptimizationRequest",
     "CVOptimizationResult",
