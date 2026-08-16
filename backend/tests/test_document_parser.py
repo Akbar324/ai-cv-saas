@@ -8,6 +8,7 @@ from docx import Document
 from backend.services.document_parser import (
     DocumentParsingError,
     extract_docx,
+    extract_pdf,
 )
 
 
@@ -82,3 +83,36 @@ def test_extract_docx_rejects_empty_document(tmp_path: Path) -> None:
         match="contains no extractable text",
     ):
         extract_docx(path)
+
+
+def test_extract_pdf_rejects_pdf_without_extractable_text(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    path = tmp_path / "candidate.pdf"
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+
+    with path.open("wb") as file:
+        writer.write(file)
+
+    with pytest.raises(
+        DocumentParsingError,
+        match="contains no extractable text",
+    ):
+        extract_pdf(path)
+
+
+def test_extract_pdf_rejects_wrong_extension(tmp_path: Path) -> None:
+    path = tmp_path / "candidate.docx"
+    path.write_text("Not really a DOCX.", encoding="utf-8")
+
+    with pytest.raises(DocumentParsingError, match=r"Expected a \.pdf file"):
+        extract_pdf(path)
+
+
+def test_extract_pdf_rejects_missing_file(tmp_path: Path) -> None:
+    path = tmp_path / "missing.pdf"
+
+    with pytest.raises(DocumentParsingError, match="does not exist"):
+        extract_pdf(path)
