@@ -140,3 +140,29 @@ def test_extract_document_rejects_unsupported_file_type(tmp_path: Path) -> None:
         match="Unsupported document type",
     ):
         extract_document(path)
+
+
+def test_extract_document_rejects_oversized_file(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.pdf"
+
+    with path.open("wb") as file:
+        file.seek((10 * 1024 * 1024) + 1)
+        file.write(b"\0")
+
+    with pytest.raises(
+        DocumentParsingError,
+        match="maximum allowed size",
+    ):
+        extract_document(path)
+
+
+def test_validate_extracted_text_rejects_excessive_text() -> None:
+    from backend.services.document_parser import validate_extracted_text
+
+    oversized_text = "A" * 100_001
+
+    with pytest.raises(
+        DocumentParsingError,
+        match="maximum allowed length",
+    ):
+        validate_extracted_text(oversized_text)
