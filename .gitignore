@@ -1,0 +1,46 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# Terraform crash/debug files
+crash.log
+crash.*.log
+
+# IDE
+.idea/
+
+# VS Code local-only files
+.vscode/*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated customer documents
+uploads/
+outputs/
+generated/
+
+# Logs
+*.log
