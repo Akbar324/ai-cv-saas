@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from docx import Document
 
 from backend.models.ai import (
@@ -115,3 +116,31 @@ def test_process_cv_returns_provider_usage_metadata(
     assert result.usage.input_tokens == 100
     assert result.usage.output_tokens == 50
     assert result.usage.total_tokens == 150
+
+
+def test_process_cv_with_config_uses_configured_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = create_docx(tmp_path / "candidate.docx")
+    fake_provider = FakeAIProvider()
+
+    monkeypatch.setattr(
+        "backend.services.cv_processing.load_ai_settings",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "backend.services.cv_processing.create_ai_provider",
+        lambda settings: fake_provider,
+    )
+
+    from backend.services.cv_processing import process_cv_with_config
+
+    result = process_cv_with_config(
+        path=path,
+        target_job_title="Cloud Engineer",
+    )
+
+    assert result.provider == "fake"
+    assert fake_provider.last_request is not None
+    assert fake_provider.last_request.target_job_title == "Cloud Engineer"
