@@ -222,9 +222,11 @@ class DynamoDBOrderRepository(OrderRepository):
     def _decode_token(token: str) -> dict[str, Any]:
         """Decode an opaque application continuation token."""
 
-        raw = base64.urlsafe_b64decode(token.encode("ascii"))
-
-        value = json.loads(raw.decode("utf-8"))
+        try:
+            raw = base64.urlsafe_b64decode(token.encode("ascii"))
+            value = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid pagination token.") from exc
 
         if not isinstance(value, dict):
             raise ValueError("Invalid pagination token.")

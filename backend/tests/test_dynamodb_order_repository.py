@@ -170,3 +170,133 @@ def test_list_recent_sorts_scan_results_newest_first() -> None:
 
     assert page.items[0].order_id == "order-002"
     assert page.items[1].order_id == "order-001"
+
+
+def test_update_requires_existing_order() -> None:
+    table = FakeTable()
+    repository = DynamoDBOrderRepository(table)
+
+    repository.update(sample_order())
+
+    assert table.last_put is not None
+    assert table.last_put["ConditionExpression"] == ("attribute_exists(order_id)")
+
+
+def test_list_by_order_status_queries_correct_index() -> None:
+    table = FakeTable()
+    table.query_response = {"Items": []}
+
+    repository = DynamoDBOrderRepository(table)
+
+    repository.list_by_order_status(OrderStatus.HUMAN_REVIEW)
+
+    assert table.last_query is not None
+    assert table.last_query["IndexName"] == ("order-status-created-at-index")
+    assert table.last_query["ExpressionAttributeValues"] == {
+        ":partition_value": "human_review"
+    }
+
+
+def test_list_by_processing_status_queries_correct_index() -> None:
+    table = FakeTable()
+    table.query_response = {"Items": []}
+
+    repository = DynamoDBOrderRepository(table)
+
+    repository.list_by_processing_status(
+        ProcessingStatus.FAILED,
+    )
+
+    assert table.last_query is not None
+    assert table.last_query["IndexName"] == ("processing-status-created-at-index")
+    assert table.last_query["ExpressionAttributeValues"] == {
+        ":partition_value": "failed"
+    }
+
+
+def test_query_returns_opaque_next_token() -> None:
+    table = FakeTable()
+
+    table.query_response = {
+        "Items": [],
+        "LastEvaluatedKey": {
+            "order_id": "order-009",
+            "customer_id": "customer-001",
+            "created_at": "2026-08-18T10:00:00+00:00",
+        },
+    }
+
+    repository = DynamoDBOrderRepository(table)
+
+    page = repository.list_by_customer("customer-001")
+
+    assert page.next_token is not None
+
+    decoded = DynamoDBOrderRepository._decode_token(page.next_token)
+
+    assert decoded["order_id"] == "order-009"
+
+
+def test_query_accepts_continuation_token() -> None:
+    table = FakeTable()
+    table.query_response = {"Items": []}
+
+    repository = DynamoDBOrderRepository(table)
+
+    key = {
+        "order_id": "order-009",
+        "customer_id": "customer-001",
+        "created_at": "2026-08-18T10:00:00+00:00",
+    }
+
+    token = DynamoDBOrderRepository._encode_token(key)
+
+    repository.list_by_customer(
+        "customer-001",
+        next_token=token,
+    )
+
+    assert table.last_query is not None
+    assert table.last_query["ExclusiveStartKey"] == key
+
+
+def test_scan_accepts_continuation_token() -> None:
+    table = FakeTable()
+    table.scan_response = {"Items": []}
+
+    repository = DynamoDBOrderRepository(table)
+
+    key = {
+        "order_id": "order-009",
+    }
+
+    token = DynamoDBOrderRepository._encode_token(key)
+
+    repository.list_recent(next_token=token)
+
+    assert table.last_scan is not None
+    assert table.last_scan["ExclusiveStartKey"] == key
+
+
+def test_decode_token_rejects_invalid_base64() -> None:
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid pagination token",
+    ):
+        DynamoDBOrderRepository._decode_token("not-valid-base64!")
+
+
+def test_decode_token_rejects_non_object_payload() -> None:
+    import base64
+
+    token = base64.urlsafe_b64encode(b'["not", "an", "object"]').decode("ascii")
+
+    import pytest
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid pagination token",
+    ):
+        DynamoDBOrderRepository._decode_token(token)
