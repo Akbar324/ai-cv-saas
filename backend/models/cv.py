@@ -8,6 +8,8 @@ it is persisted, edited, or rendered into customer-facing documents.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -56,7 +58,7 @@ class WorkExperience(CVBaseModel):
 class Education(CVBaseModel):
     """One education record."""
 
-    institution: str = Field(min_length=1, max_length=250)
+    institution: str | None = Field(default=None, max_length=250)
     qualification: str | None = Field(default=None, max_length=250)
     field_of_study: str | None = Field(default=None, max_length=250)
     location: str | None = Field(default=None, max_length=150)
@@ -101,7 +103,7 @@ class AdditionalInformation(CVBaseModel):
 class CanonicalCV(CVBaseModel):
     """Canonical representation of a customer's CV."""
 
-    schema_version: str = "1.0"
+    schema_version: Literal["1.0"] = "1.0"
 
     personal_details: PersonalDetails
     target_role: TargetRole

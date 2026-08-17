@@ -1,10 +1,13 @@
-"""OpenAI implementation of the AI CV optimization provider."""
+"""Google Gemini implementation of the AI CV optimization provider."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from openai import APIError, OpenAI
+from google import genai
+from google.genai import types
+from pydantic import ValidationError
 
 from backend.models.ai import (
     AIUsage,
@@ -27,6 +30,14 @@ Rules:
   projects, skills, responsibilities, or numerical achievements.
 - Do not infer unsupported achievements.
 - If information is unavailable, leave optional fields empty or null.
+- Never create placeholder facts such as "University not specified".
+- Never copy a candidate's personal location into an employer or education
+  location unless the source explicitly states that location.
+- Do not convert general responsibilities into specialized techniques such
+  as root cause analysis, data analysis, process improvement, or technical
+  troubleshooting unless supported by the source.
+- Only include skills directly supported by the customer's supplied
+  information.
 - Keep the output professional, concise, and suitable for a CV.
 - Treat the customer's supplied source CV and additional customer
   information as the only factual evidence about the candidate.
@@ -38,13 +49,32 @@ Rules:
 - Do not strengthen a factual claim beyond the evidence. For example,
   "AWS" must not become "hands-on AWS environments" unless that experience
   is explicitly supported.
+- Do not generate or modify application metadata such as schema_version.
 
 Primary rule: Improve expression; never invent evidence.
 """.strip()
 
 
-class OpenAIProvider(AIProvider):
-    """CV optimization provider backed by the OpenAI Responses API."""
+def build_gemini_cv_schema() -> dict[str, Any]:
+    """Build the Gemini schema using CV content fields only."""
+
+    schema = CanonicalCV.model_json_schema()
+
+    properties = schema.get("properties")
+
+    if isinstance(properties, dict):
+        properties.pop("schema_version", None)
+
+    required = schema.get("required")
+
+    if isinstance(required, list):
+        schema["required"] = [field for field in required if field != "schema_version"]
+
+    return schema
+
+
+class GeminiProvider(AIProvider):
+    """CV optimization provider backed by the Google Gemini API."""
 
     def __init__(
         self,
@@ -54,14 +84,14 @@ class OpenAIProvider(AIProvider):
         client: Any | None = None,
     ) -> None:
         if not model.strip():
-            raise ValueError("OpenAI model must not be empty.")
+            raise ValueError("Gemini model must not be empty.")
 
         self._model = model
 
         if client is not None:
             self._client = client
         else:
-            self._client = OpenAI(api_key=api_key)
+            self._client = genai.Client(api_key=api_key)
 
     def optimize_cv(
         self,
@@ -72,32 +102,60 @@ class OpenAIProvider(AIProvider):
         user_input = self._build_user_input(request)
 
         try:
-            response = self._client.responses.parse(
+            response = self._client.models.generate_content(
                 model=self._model,
-                instructions=SYSTEM_INSTRUCTIONS,
-                input=user_input,
-                text_format=CanonicalCV,
-                store=False,
+                contents=user_input,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTIONS,
+                    response_mime_type="application/json",
+                    response_json_schema=build_gemini_cv_schema(),
+                ),
             )
-        except APIError as exc:
-            raise AIProviderError("OpenAI request failed.") from exc
+        except Exception as exc:
+            raise AIProviderError("Gemini request failed.") from exc
 
-        parsed = response.output_parsed
+        response_text = getattr(response, "text", None)
 
-        if parsed is None:
-            raise AIProviderError("OpenAI returned no valid structured CV output.")
+        if not response_text:
+            raise AIProviderError("Gemini returned no structured CV output.")
 
-        usage_data = getattr(response, "usage", None)
+        try:
+            payload = json.loads(response_text)
+
+            if not isinstance(payload, dict):
+                raise AIProviderError("Gemini returned a non-object CV response.")
+
+            # Application metadata is controlled only by our code.
+            payload.pop("schema_version", None)
+            payload["schema_version"] = "1.0"
+
+            parsed = CanonicalCV.model_validate(payload)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise AIProviderError("Gemini returned invalid canonical CV data.") from exc
+
+        usage_metadata = getattr(response, "usage_metadata", None)
 
         usage = AIUsage(
-            input_tokens=getattr(usage_data, "input_tokens", None),
-            output_tokens=getattr(usage_data, "output_tokens", None),
-            total_tokens=getattr(usage_data, "total_tokens", None),
+            input_tokens=getattr(
+                usage_metadata,
+                "prompt_token_count",
+                None,
+            ),
+            output_tokens=getattr(
+                usage_metadata,
+                "candidates_token_count",
+                None,
+            ),
+            total_tokens=getattr(
+                usage_metadata,
+                "total_token_count",
+                None,
+            ),
         )
 
         return CVOptimizationResult(
             cv=parsed,
-            provider="openai",
+            provider="gemini",
             model=self._model,
             usage=usage,
         )

@@ -28,6 +28,11 @@ class AISettings(BaseSettings):
         validation_alias="OPENAI_API_KEY",
         min_length=1,
     )
+    gemini_api_key: str | None = Field(
+        default=None,
+        validation_alias="GEMINI_API_KEY",
+        min_length=1,
+    )
 
 
 def load_ai_settings() -> AISettings:
