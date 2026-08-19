@@ -10,7 +10,7 @@ terraform {
 
   backend "s3" {
     bucket       = "ai-cv-saas-terraform-state-874348038937-me-central-1"
-    key          = "dev/terraform.tfstate"
+    key          = "bootstrap/terraform.tfstate"
     region       = "me-central-1"
     encrypt      = true
     use_lockfile = true
