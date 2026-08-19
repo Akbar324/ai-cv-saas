@@ -1,5 +1,13 @@
 """Persistence repository contracts and implementations."""
 
+from backend.repositories.document_repository import (
+    DocumentRepository,
+    StoredDocument,
+)
 from backend.repositories.order_repository import OrderRepository
 
-__all__ = ["OrderRepository"]
+__all__ = [
+    "DocumentRepository",
+    "OrderRepository",
+    "StoredDocument",
+]
