@@ -44,3 +44,9 @@ generated/
 
 # Logs
 *.log
+
+# Terraform local variable files
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+!*.tfvars.json.example
