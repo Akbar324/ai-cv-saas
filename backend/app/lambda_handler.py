@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from backend.models.api import CreateOrderRequest, CreateUploadTargetRequest
-from backend.services.cv_workflow import process_uploaded_cv
 from backend.services.order_service import create_order, get_order
 from backend.services.runtime import get_document_repository, get_order_repository
 from backend.services.upload_service import create_source_upload_target
@@ -53,18 +52,6 @@ def lambda_handler(
             return response(404, {"message": "Route not found."})
 
         return handle_create_upload_target(
-            event,
-            order_id,
-            repository,
-        )
-
-    if method == "POST" and path.endswith("/process"):
-        order_id = path.removeprefix("/orders/").removesuffix("/process").strip("/")
-
-        if not order_id or "/" in order_id:
-            return response(404, {"message": "Route not found."})
-
-        return handle_process_order(
             event,
             order_id,
             repository,
@@ -202,57 +189,4 @@ def handle_create_upload_target(
             "fields": target.fields,
             "expires_in_seconds": target.expires_in_seconds,
         },
-    )
-
-
-def handle_process_order(
-    event: dict[str, Any],
-    order_id: str,
-    repository: Any,
-) -> dict[str, Any]:
-    """Handle POST /orders/{order_id}/process."""
-
-    order = get_order(
-        order_id=order_id,
-        repository=repository,
-    )
-
-    if order is None:
-        return response(404, {"message": "Order not found."})
-
-    raw_body = event.get("body")
-    payload: dict[str, Any] = {}
-
-    if raw_body:
-        try:
-            decoded = json.loads(raw_body)
-
-            if not isinstance(decoded, dict):
-                raise ValueError
-
-            payload = decoded
-
-        except (json.JSONDecodeError, ValueError):
-            return response(
-                400,
-                {"message": "Invalid processing request."},
-            )
-
-    try:
-        processed = process_uploaded_cv(
-            order=order,
-            job_description=payload.get("job_description"),
-            additional_customer_information=payload.get(
-                "additional_customer_information"
-            ),
-        )
-    except (ValueError, FileNotFoundError) as exc:
-        return response(
-            400,
-            {"message": str(exc)},
-        )
-
-    return response(
-        200,
-        processed.model_dump(mode="json"),
     )

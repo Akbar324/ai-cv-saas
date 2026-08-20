@@ -17,3 +17,13 @@ output "orders_table_arn" {
   description = "ARN of the DynamoDB orders table."
   value       = aws_dynamodb_table.orders.arn
 }
+
+output "api_lambda_name" {
+  description = "DEV backend API Lambda function name."
+  value       = aws_lambda_function.api.function_name
+}
+
+output "api_endpoint" {
+  description = "DEV API Gateway HTTP API endpoint."
+  value       = aws_apigatewayv2_api.api.api_endpoint
+}

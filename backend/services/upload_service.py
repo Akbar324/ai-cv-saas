@@ -9,10 +9,11 @@ from backend.repositories.document_repository import (
     UploadTarget,
 )
 from backend.repositories.order_repository import OrderRepository
-from backend.services.cv_persistence import (
-    DOCX_CONTENT_TYPE,
-    PDF_CONTENT_TYPE,
+
+DOCX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+PDF_CONTENT_TYPE = "application/pdf"
 
 MAX_SOURCE_CV_SIZE_BYTES = 10 * 1024 * 1024
 

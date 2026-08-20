@@ -50,3 +50,6 @@ generated/
 *.tfvars.json
 !*.tfvars.example
 !*.tfvars.json.example
+
+# Local build artifacts
+build/
