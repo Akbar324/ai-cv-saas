@@ -33,12 +33,22 @@ class FakeSession:
         self.s3_client = object()
         self.dynamodb = FakeDynamoDB()
 
-    def client(self, service_name: str) -> object:
+    def client(
+        self,
+        service_name: str,
+        **kwargs: Any,
+    ) -> object:
         assert service_name == "s3"
+        assert kwargs["region_name"] == "me-central-1"
         return self.s3_client
 
-    def resource(self, service_name: str) -> Any:
+    def resource(
+        self,
+        service_name: str,
+        **kwargs: Any,
+    ) -> Any:
         assert service_name == "dynamodb"
+        assert kwargs["region_name"] == "me-central-1"
         return self.dynamodb
 
 
