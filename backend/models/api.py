@@ -16,3 +16,10 @@ class CreateOrderRequest(CVBaseModel):
         default=None,
         max_length=20_000,
     )
+
+
+class CreateUploadTargetRequest(CVBaseModel):
+    """Request for a temporary source-CV upload target."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=150)

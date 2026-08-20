@@ -17,6 +17,8 @@ def test_document_repository_defines_required_operations() -> None:
         "put_file",
         "put_text",
         "get_text",
+        "download_file",
+        "create_upload_target",
         "delete",
         "exists",
     }

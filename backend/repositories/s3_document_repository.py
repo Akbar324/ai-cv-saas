@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError  # type: ignore[import-untyped]
 from backend.repositories.document_repository import (
     DocumentRepository,
     StoredDocument,
+    UploadTarget,
 )
 
 
@@ -103,6 +104,68 @@ class S3DocumentRepository(DocumentRepository):
             raise TypeError("S3 object body must be bytes.")
 
         return body.decode("utf-8")
+
+    def download_file(
+        self,
+        *,
+        key: str,
+        path: Path,
+    ) -> None:
+        """Download one S3 object to a local file."""
+
+        self._validate_key(key)
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        self._client.download_file(
+            self._bucket_name,
+            key,
+            str(path),
+        )
+
+    def create_upload_target(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        max_size_bytes: int,
+        expires_in_seconds: int = 900,
+    ) -> UploadTarget:
+        """Create a size-limited presigned POST upload target."""
+
+        self._validate_key(key)
+
+        if max_size_bytes <= 0:
+            raise ValueError("Maximum upload size must be positive.")
+
+        if expires_in_seconds <= 0:
+            raise ValueError("Upload expiration must be positive.")
+
+        result = self._client.generate_presigned_post(
+            Bucket=self._bucket_name,
+            Key=key,
+            Fields={
+                "Content-Type": content_type,
+            },
+            Conditions=[
+                {
+                    "Content-Type": content_type,
+                },
+                [
+                    "content-length-range",
+                    1,
+                    max_size_bytes,
+                ],
+            ],
+            ExpiresIn=expires_in_seconds,
+        )
+
+        return UploadTarget(
+            key=key,
+            url=result["url"],
+            fields=result["fields"],
+            expires_in_seconds=expires_in_seconds,
+        )
 
     def delete(self, key: str) -> None:
         """Delete one object from S3."""

@@ -14,6 +14,16 @@ class StoredDocument:
     size_bytes: int
 
 
+@dataclass(frozen=True)
+class UploadTarget:
+    """Temporary browser upload target for one document."""
+
+    key: str
+    url: str
+    fields: dict[str, str]
+    expires_in_seconds: int
+
+
 class DocumentRepository(ABC):
     """Storage-independent persistence contract for CV documents."""
 
@@ -40,6 +50,26 @@ class DocumentRepository(ABC):
     @abstractmethod
     def get_text(self, key: str) -> str:
         """Return one UTF-8 text document."""
+
+    @abstractmethod
+    def download_file(
+        self,
+        *,
+        key: str,
+        path: Path,
+    ) -> None:
+        """Download one stored object to a local file."""
+
+    @abstractmethod
+    def create_upload_target(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        max_size_bytes: int,
+        expires_in_seconds: int = 900,
+    ) -> UploadTarget:
+        """Create a temporary direct-upload target."""
 
     @abstractmethod
     def delete(self, key: str) -> None:

@@ -19,6 +19,7 @@ from backend.models.order import (
 from backend.repositories.document_repository import (
     DocumentRepository,
     StoredDocument,
+    UploadTarget,
 )
 from backend.repositories.order_repository import (
     OrderPage,
@@ -101,6 +102,24 @@ class FakeDocumentRepository(DocumentRepository):
 
     def get_text(self, key: str) -> str:
         return self.objects[key].decode("utf-8")
+
+    def download_file(
+        self,
+        *,
+        key: str,
+        path: Path,
+    ) -> None:
+        path.write_bytes(self.objects[key])
+
+    def create_upload_target(
+        self,
+        *,
+        key: str,
+        content_type: str,
+        max_size_bytes: int,
+        expires_in_seconds: int = 900,
+    ) -> UploadTarget:
+        raise NotImplementedError
 
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)

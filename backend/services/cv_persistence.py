@@ -51,6 +51,7 @@ def persist_processed_cv(
     order_repository: OrderRepository,
     job_description: str | None = None,
     additional_customer_information: str | None = None,
+    existing_source_key: str | None = None,
 ) -> Order:
     """Persist source CV, process it, persist canonical JSON, and update order."""
 

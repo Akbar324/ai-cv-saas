@@ -38,3 +38,51 @@ def process_and_persist_cv(
         job_description=job_description,
         additional_customer_information=additional_customer_information,
     )
+
+
+def process_uploaded_cv(
+    *,
+    order: Order,
+    job_description: str | None = None,
+    additional_customer_information: str | None = None,
+) -> Order:
+    """Process a source CV that has already been uploaded to document storage."""
+
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    source_key = order.documents.source_s3_key
+
+    if source_key is None:
+        raise ValueError("Order has no uploaded source CV.")
+
+    ai_settings = load_ai_settings()
+    aws_settings = load_aws_settings()
+
+    provider = create_ai_provider(ai_settings)
+    document_repository = create_document_repository(aws_settings)
+    order_repository = create_order_repository(aws_settings)
+
+    if not document_repository.exists(source_key):
+        raise FileNotFoundError("Uploaded source CV was not found.")
+
+    suffix = Path(source_key).suffix.lower()
+
+    with TemporaryDirectory() as temp_dir:
+        source_path = Path(temp_dir) / f"source{suffix}"
+
+        document_repository.download_file(
+            key=source_key,
+            path=source_path,
+        )
+
+        return persist_processed_cv(
+            order=order,
+            source_path=source_path,
+            provider=provider,
+            document_repository=document_repository,
+            order_repository=order_repository,
+            job_description=job_description,
+            additional_customer_information=additional_customer_information,
+            existing_source_key=source_key,
+        )

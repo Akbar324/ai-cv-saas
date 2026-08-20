@@ -189,3 +189,67 @@ def test_repository_requires_bucket_name() -> None:
             bucket_name="",
             client=FakeS3Client(),
         )
+
+
+def test_create_upload_target_returns_presigned_post() -> None:
+    class PresignClient(FakeS3Client):
+        def generate_presigned_post(
+            self,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            assert kwargs["Bucket"] == "test-documents-bucket"
+            assert kwargs["Key"] == "orders/order-001/source/original.pdf"
+
+            return {
+                "url": "https://example.test/upload",
+                "fields": {
+                    "key": kwargs["Key"],
+                    "Content-Type": "application/pdf",
+                },
+            }
+
+    client = PresignClient()
+
+    repo = S3DocumentRepository(
+        bucket_name="test-documents-bucket",
+        client=client,
+    )
+
+    target = repo.create_upload_target(
+        key="orders/order-001/source/original.pdf",
+        content_type="application/pdf",
+        max_size_bytes=10_000,
+    )
+
+    assert target.url == "https://example.test/upload"
+    assert target.key.endswith("original.pdf")
+    assert target.expires_in_seconds == 900
+
+
+def test_download_file_writes_object(tmp_path: Path) -> None:
+    class DownloadClient(FakeS3Client):
+        def download_file(
+            self,
+            bucket: str,
+            key: str,
+            filename: str,
+        ) -> None:
+            assert bucket == "test-documents-bucket"
+            Path(filename).write_bytes(self.objects[key])
+
+    client = DownloadClient()
+    client.objects["orders/order-001/source/original.pdf"] = b"pdf-data"
+
+    repo = S3DocumentRepository(
+        bucket_name="test-documents-bucket",
+        client=client,
+    )
+
+    path = tmp_path / "download.pdf"
+
+    repo.download_file(
+        key="orders/order-001/source/original.pdf",
+        path=path,
+    )
+
+    assert path.read_bytes() == b"pdf-data"
