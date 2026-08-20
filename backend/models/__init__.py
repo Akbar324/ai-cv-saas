@@ -5,11 +5,14 @@ from backend.models.ai import (
     CVOptimizationRequest,
     CVOptimizationResult,
 )
+from backend.models.aws_settings import AWSSettings, load_aws_settings
 from backend.models.cv import CanonicalCV
 from backend.models.document import ExtractedDocument
 from backend.models.settings import AISettings, load_ai_settings
 
 __all__ = [
+    "load_aws_settings",
+    "AWSSettings",
     "AISettings",
     "AIUsage",
     "CVOptimizationRequest",

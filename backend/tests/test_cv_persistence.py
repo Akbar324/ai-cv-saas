@@ -280,3 +280,82 @@ def test_canonical_json_is_valid_and_contains_candidate(
 
     assert cv.personal_details.full_name == "Synthetic Candidate"
     assert cv.target_role.job_title == "Cloud Engineer"
+
+
+class FailingAIProvider(AIProvider):
+    """AI provider that always fails."""
+
+    def optimize_cv(
+        self,
+        request: CVOptimizationRequest,
+    ) -> CVOptimizationResult:
+        raise RuntimeError("Synthetic AI failure")
+
+
+def test_persist_processed_cv_marks_processing_before_ai(
+    tmp_path: Path,
+) -> None:
+    source_path = create_docx(tmp_path / "candidate.docx")
+    order_repository = FakeOrderRepository()
+
+    persist_processed_cv(
+        order=sample_order(),
+        source_path=source_path,
+        provider=FakeAIProvider(),
+        document_repository=FakeDocumentRepository(),
+        order_repository=order_repository,
+    )
+
+    assert order_repository.updated_order is not None
+    assert (
+        order_repository.updated_order.processing_status is ProcessingStatus.SUCCEEDED
+    )
+
+
+def test_persist_processed_cv_marks_failed_when_ai_fails(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    source_path = create_docx(tmp_path / "candidate.docx")
+    order_repository = FakeOrderRepository()
+
+    order = sample_order()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Synthetic AI failure",
+    ):
+        persist_processed_cv(
+            order=order,
+            source_path=source_path,
+            provider=FailingAIProvider(),
+            document_repository=FakeDocumentRepository(),
+            order_repository=order_repository,
+        )
+
+    assert order.processing_status is ProcessingStatus.FAILED
+    assert order_repository.updated_order is not None
+    assert order_repository.updated_order.processing_status is ProcessingStatus.FAILED
+
+
+def test_failed_processing_does_not_increment_cv_version(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    source_path = create_docx(tmp_path / "candidate.docx")
+
+    order = sample_order()
+
+    with pytest.raises(RuntimeError):
+        persist_processed_cv(
+            order=order,
+            source_path=source_path,
+            provider=FailingAIProvider(),
+            document_repository=FakeDocumentRepository(),
+            order_repository=FakeOrderRepository(),
+        )
+
+    assert order.current_cv_version == 0
+    assert order.documents.current_cv_s3_key is None
