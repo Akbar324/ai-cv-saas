@@ -37,3 +37,18 @@ output "worker_lambda_name" {
   description = "DEV CV processing worker Lambda."
   value       = aws_lambda_function.worker.function_name
 }
+
+output "cognito_user_pool_id" {
+  description = "DEV Cognito customer user pool ID."
+  value       = aws_cognito_user_pool.customers.id
+}
+
+output "cognito_web_client_id" {
+  description = "DEV Cognito web application client ID."
+  value       = aws_cognito_user_pool_client.web.id
+}
+
+output "cognito_issuer" {
+  description = "DEV Cognito JWT issuer."
+  value       = aws_cognito_user_pool.customers.endpoint
+}

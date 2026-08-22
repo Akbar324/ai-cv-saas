@@ -6,9 +6,8 @@ from backend.models.cv import CVBaseModel
 
 
 class CreateOrderRequest(CVBaseModel):
-    """Customer input required to create a CV order."""
+    """Authenticated customer input required to create a CV order."""
 
-    customer_id: str = Field(min_length=1, max_length=100)
     target_job_title: str = Field(min_length=1, max_length=150)
     target_industry: str | None = Field(default=None, max_length=150)
     job_description: str | None = Field(default=None, max_length=20_000)

@@ -13,6 +13,11 @@ from backend.models.api import (
     CreateUploadTargetRequest,
     ProcessOrderRequest,
 )
+from backend.models.order import Order
+from backend.services.auth import (
+    AuthenticationError,
+    authenticated_customer_id,
+)
 from backend.services.order_service import create_order, get_order
 from backend.services.processing_queue import enqueue_order_processing
 from backend.services.runtime import (
@@ -68,6 +73,12 @@ def lambda_handler(
 
     try:
         return route_request(event)
+    except AuthenticationError:
+        return error_response(
+            401,
+            message="Authentication required.",
+            error_code="UNAUTHORIZED",
+        )
     except Exception:
         logger.exception("Unhandled API request failure.")
 
@@ -78,33 +89,54 @@ def lambda_handler(
         )
 
 
+def owned_order(
+    *,
+    order_id: str,
+    customer_id: str,
+    repository: Any,
+) -> Order | None:
+    """Return an order only when it belongs to the authenticated customer."""
+
+    order = get_order(
+        order_id=order_id,
+        repository=repository,
+    )
+
+    if order is None or order.customer_id != customer_id:
+        return None
+
+    return order
+
+
 def route_request(
     event: dict[str, Any],
 ) -> dict[str, Any]:
-    """Route one HTTP API request."""
+    """Route one authenticated HTTP API request."""
+
+    customer_id = authenticated_customer_id(event)
 
     method = event.get("requestContext", {}).get("http", {}).get("method", "").upper()
 
     path = event.get("rawPath", "")
-
     repository = get_order_repository()
 
     if method == "POST" and path == "/orders":
-        return handle_create_order(event, repository)
+        return handle_create_order(
+            event,
+            customer_id,
+            repository,
+        )
 
     if method == "POST" and path.endswith("/upload-url"):
         order_id = path.removeprefix("/orders/").removesuffix("/upload-url").strip("/")
 
         if not order_id or "/" in order_id:
-            return error_response(
-                404,
-                message="Route not found.",
-                error_code="ROUTE_NOT_FOUND",
-            )
+            return route_not_found()
 
         return handle_create_upload_target(
             event,
             order_id,
+            customer_id,
             repository,
         )
 
@@ -112,15 +144,12 @@ def route_request(
         order_id = path.removeprefix("/orders/").removesuffix("/process").strip("/")
 
         if not order_id or "/" in order_id:
-            return error_response(
-                404,
-                message="Route not found.",
-                error_code="ROUTE_NOT_FOUND",
-            )
+            return route_not_found()
 
         return handle_queue_processing(
             event,
             order_id,
+            customer_id,
             repository,
         )
 
@@ -128,14 +157,18 @@ def route_request(
         order_id = path.removeprefix("/orders/").strip()
 
         if not order_id or "/" in order_id:
-            return error_response(
-                404,
-                message="Route not found.",
-                error_code="ROUTE_NOT_FOUND",
-            )
+            return route_not_found()
 
-        return handle_get_order(order_id, repository)
+        return handle_get_order(
+            order_id,
+            customer_id,
+            repository,
+        )
 
+    return route_not_found()
+
+
+def route_not_found() -> dict[str, Any]:
     return error_response(
         404,
         message="Route not found.",
@@ -145,6 +178,7 @@ def route_request(
 
 def handle_create_order(
     event: dict[str, Any],
+    customer_id: str,
     repository: Any,
 ) -> dict[str, Any]:
     """Handle POST /orders."""
@@ -174,6 +208,7 @@ def handle_create_order(
         )
 
     order = create_order(
+        customer_id=customer_id,
         request=request,
         repository=repository,
     )
@@ -186,21 +221,19 @@ def handle_create_order(
 
 def handle_get_order(
     order_id: str,
+    customer_id: str,
     repository: Any,
 ) -> dict[str, Any]:
     """Handle GET /orders/{order_id}."""
 
-    order = get_order(
+    order = owned_order(
         order_id=order_id,
+        customer_id=customer_id,
         repository=repository,
     )
 
     if order is None:
-        return error_response(
-            404,
-            message="Order not found.",
-            error_code="ORDER_NOT_FOUND",
-        )
+        return order_not_found()
 
     return response(
         200,
@@ -208,24 +241,32 @@ def handle_get_order(
     )
 
 
+def order_not_found() -> dict[str, Any]:
+    """Avoid revealing whether another customer's order exists."""
+
+    return error_response(
+        404,
+        message="Order not found.",
+        error_code="ORDER_NOT_FOUND",
+    )
+
+
 def handle_create_upload_target(
     event: dict[str, Any],
     order_id: str,
+    customer_id: str,
     repository: Any,
 ) -> dict[str, Any]:
     """Handle POST /orders/{order_id}/upload-url."""
 
-    order = get_order(
+    order = owned_order(
         order_id=order_id,
+        customer_id=customer_id,
         repository=repository,
     )
 
     if order is None:
-        return error_response(
-            404,
-            message="Order not found.",
-            error_code="ORDER_NOT_FOUND",
-        )
+        return order_not_found()
 
     raw_body = event.get("body")
 
@@ -273,21 +314,19 @@ def handle_create_upload_target(
 def handle_queue_processing(
     event: dict[str, Any],
     order_id: str,
+    customer_id: str,
     repository: Any,
 ) -> dict[str, Any]:
     """Handle POST /orders/{order_id}/process."""
 
-    order = get_order(
+    order = owned_order(
         order_id=order_id,
+        customer_id=customer_id,
         repository=repository,
     )
 
     if order is None:
-        return error_response(
-            404,
-            message="Order not found.",
-            error_code="ORDER_NOT_FOUND",
-        )
+        return order_not_found()
 
     if order.documents.source_s3_key is None:
         return error_response(

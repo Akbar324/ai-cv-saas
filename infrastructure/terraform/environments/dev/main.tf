@@ -315,22 +315,28 @@ resource "aws_apigatewayv2_integration" "api_lambda" {
 resource "aws_apigatewayv2_route" "create_order" {
   api_id = aws_apigatewayv2_api.api.id
 
-  route_key = "POST /orders"
-  target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  route_key          = "POST /orders"
+  target             = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers.id
 }
 
 resource "aws_apigatewayv2_route" "get_order" {
   api_id = aws_apigatewayv2_api.api.id
 
-  route_key = "GET /orders/{order_id}"
-  target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  route_key          = "GET /orders/{order_id}"
+  target             = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers.id
 }
 
 resource "aws_apigatewayv2_route" "create_upload_target" {
   api_id = aws_apigatewayv2_api.api.id
 
-  route_key = "POST /orders/{order_id}/upload-url"
-  target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  route_key          = "POST /orders/{order_id}/upload-url"
+  target             = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers.id
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -568,8 +574,10 @@ resource "aws_lambda_event_source_mapping" "processing" {
 resource "aws_apigatewayv2_route" "process_order" {
   api_id = aws_apigatewayv2_api.api.id
 
-  route_key = "POST /orders/{order_id}/process"
-  target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  route_key          = "POST /orders/{order_id}/process"
+  target             = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.customers.id
 }
 
 # ---------------------------------------------------------------------------
@@ -611,5 +619,83 @@ resource "aws_cloudwatch_metric_alarm" "processing_dlq_messages" {
 
   dimensions = {
     QueueName = aws_sqs_queue.processing_dlq.name
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Cognito authentication
+# ---------------------------------------------------------------------------
+
+resource "aws_cognito_user_pool" "customers" {
+  provider = aws.cognito
+  name     = "${local.name_prefix}-customers"
+
+  username_attributes = [
+    "email"
+  ]
+
+  auto_verified_attributes = [
+    "email"
+  ]
+
+  password_policy {
+    minimum_length                   = 10
+    require_lowercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    require_uppercase                = true
+    temporary_password_validity_days = 7
+  }
+
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+}
+
+resource "aws_cognito_user_pool_client" "web" {
+  provider     = aws.cognito
+  name         = "${local.name_prefix}-web"
+  user_pool_id = aws_cognito_user_pool.customers.id
+
+  generate_secret = false
+
+  explicit_auth_flows = [
+    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_USER_SRP_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH"
+  ]
+
+  access_token_validity  = 60
+  id_token_validity      = 60
+  refresh_token_validity = 30
+
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
+  }
+
+  prevent_user_existence_errors = "ENABLED"
+}
+
+resource "aws_apigatewayv2_authorizer" "customers" {
+  api_id = aws_apigatewayv2_api.api.id
+
+  authorizer_type = "JWT"
+  name            = "${local.name_prefix}-cognito"
+
+  identity_sources = [
+    "$request.header.Authorization"
+  ]
+
+  jwt_configuration {
+    audience = [
+      aws_cognito_user_pool_client.web.id
+    ]
+
+    issuer = "https://cognito-idp.us-east-1.amazonaws.com/${aws_cognito_user_pool.customers.id}"
   }
 }

@@ -83,12 +83,21 @@ def event(
     method: str,
     path: str,
     body: dict[str, Any] | None = None,
+    *,
+    customer_id: str = "customer-001",
 ) -> dict[str, Any]:
-    result = {
+    result: dict[str, Any] = {
         "requestContext": {
             "http": {
                 "method": method,
-            }
+            },
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "sub": customer_id,
+                    }
+                }
+            },
         },
         "rawPath": path,
     }
@@ -107,7 +116,6 @@ def test_post_orders_creates_order(
             "POST",
             "/orders",
             {
-                "customer_id": "customer-001",
                 "target_job_title": "Cloud Engineer",
                 "target_industry": "Cloud Computing",
             },
@@ -187,6 +195,54 @@ def test_unknown_route_returns_404(
 ) -> None:
     result = lambda_handler(
         event("GET", "/unknown"),
+        None,
+    )
+
+    assert result["statusCode"] == 404
+
+
+def test_create_order_uses_authenticated_customer(
+    repository: FakeOrderRepository,
+) -> None:
+    result = lambda_handler(
+        event(
+            "POST",
+            "/orders",
+            {
+                "target_job_title": "Cloud Engineer",
+            },
+            customer_id="cognito-sub-123",
+        ),
+        None,
+    )
+
+    payload = json.loads(result["body"])
+
+    assert result["statusCode"] == 201
+    assert payload["customer_id"] == "cognito-sub-123"
+
+
+def test_customer_cannot_read_another_customers_order(
+    repository: FakeOrderRepository,
+) -> None:
+    now = datetime.now(UTC)
+
+    repository.create(
+        Order(
+            order_id="ord_private",
+            customer_id="customer-owner",
+            target_job_title="Cloud Engineer",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    result = lambda_handler(
+        event(
+            "GET",
+            "/orders/ord_private",
+            customer_id="different-customer",
+        ),
         None,
     )
 
