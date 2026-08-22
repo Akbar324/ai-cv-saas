@@ -24,6 +24,7 @@ class ProcessingStatus(StrEnum):
     """Technical processing state for the CV workflow."""
 
     PENDING = "pending"
+    QUEUED = "queued"
     PROCESSING = "processing"
     SUCCEEDED = "succeeded"
     FAILED = "failed"

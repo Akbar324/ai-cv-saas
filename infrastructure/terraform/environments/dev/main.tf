@@ -279,6 +279,26 @@ resource "aws_lambda_function" "api" {
 resource "aws_apigatewayv2_api" "api" {
   name          = "${local.name_prefix}-api"
   protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_headers = [
+      "content-type",
+      "authorization"
+    ]
+
+    allow_methods = [
+      "GET",
+      "POST",
+      "OPTIONS"
+    ]
+
+    allow_origins = [
+      "http://localhost:3000",
+      "http://localhost:5173"
+    ]
+
+    max_age = 300
+  }
 }
 
 resource "aws_apigatewayv2_integration" "api_lambda" {
@@ -550,4 +570,46 @@ resource "aws_apigatewayv2_route" "process_order" {
 
   route_key = "POST /orders/{order_id}/process"
   target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+}
+
+# ---------------------------------------------------------------------------
+# Async processing observability
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_metric_alarm" "worker_errors" {
+  alarm_name          = "${local.worker_lambda_name}-errors"
+  alarm_description   = "Worker Lambda reported one or more errors."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  threshold           = 1
+
+  namespace   = "AWS/Lambda"
+  metric_name = "Errors"
+  statistic   = "Sum"
+  period      = 300
+
+  treat_missing_data = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.worker.function_name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "processing_dlq_messages" {
+  alarm_name          = "${local.name_prefix}-processing-dlq-messages"
+  alarm_description   = "Messages are visible in the CV processing DLQ."
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = 1
+  threshold           = 1
+
+  namespace   = "AWS/SQS"
+  metric_name = "ApproximateNumberOfMessagesVisible"
+  statistic   = "Maximum"
+  period      = 300
+
+  treat_missing_data = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.processing_dlq.name
+  }
 }

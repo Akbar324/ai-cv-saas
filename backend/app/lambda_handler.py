@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from pydantic import ValidationError
@@ -13,12 +14,16 @@ from backend.models.api import (
     ProcessOrderRequest,
 )
 from backend.services.order_service import create_order, get_order
+from backend.services.processing_queue import enqueue_order_processing
 from backend.services.runtime import (
     get_document_repository,
     get_order_repository,
     get_processing_queue,
 )
 from backend.services.upload_service import create_source_upload_target
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def response(
@@ -36,6 +41,23 @@ def response(
     }
 
 
+def error_response(
+    status_code: int,
+    *,
+    message: str,
+    error_code: str,
+) -> dict[str, Any]:
+    """Build a stable structured API error response."""
+
+    return response(
+        status_code,
+        {
+            "message": message,
+            "error_code": error_code,
+        },
+    )
+
+
 def lambda_handler(
     event: dict[str, Any],
     context: Any,
@@ -43,6 +65,23 @@ def lambda_handler(
     """Route API Gateway HTTP API requests."""
 
     del context
+
+    try:
+        return route_request(event)
+    except Exception:
+        logger.exception("Unhandled API request failure.")
+
+        return error_response(
+            500,
+            message="Internal server error.",
+            error_code="INTERNAL_ERROR",
+        )
+
+
+def route_request(
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    """Route one HTTP API request."""
 
     method = event.get("requestContext", {}).get("http", {}).get("method", "").upper()
 
@@ -57,7 +96,11 @@ def lambda_handler(
         order_id = path.removeprefix("/orders/").removesuffix("/upload-url").strip("/")
 
         if not order_id or "/" in order_id:
-            return response(404, {"message": "Route not found."})
+            return error_response(
+                404,
+                message="Route not found.",
+                error_code="ROUTE_NOT_FOUND",
+            )
 
         return handle_create_upload_target(
             event,
@@ -69,7 +112,11 @@ def lambda_handler(
         order_id = path.removeprefix("/orders/").removesuffix("/process").strip("/")
 
         if not order_id or "/" in order_id:
-            return response(404, {"message": "Route not found."})
+            return error_response(
+                404,
+                message="Route not found.",
+                error_code="ROUTE_NOT_FOUND",
+            )
 
         return handle_queue_processing(
             event,
@@ -81,16 +128,18 @@ def lambda_handler(
         order_id = path.removeprefix("/orders/").strip()
 
         if not order_id or "/" in order_id:
-            return response(
+            return error_response(
                 404,
-                {"message": "Route not found."},
+                message="Route not found.",
+                error_code="ROUTE_NOT_FOUND",
             )
 
         return handle_get_order(order_id, repository)
 
-    return response(
+    return error_response(
         404,
-        {"message": "Route not found."},
+        message="Route not found.",
+        error_code="ROUTE_NOT_FOUND",
     )
 
 
@@ -103,9 +152,10 @@ def handle_create_order(
     raw_body = event.get("body")
 
     if not raw_body:
-        return response(
+        return error_response(
             400,
-            {"message": "Request body is required."},
+            message="Request body is required.",
+            error_code="MISSING_BODY",
         )
 
     try:
@@ -117,9 +167,10 @@ def handle_create_order(
         request = CreateOrderRequest.model_validate(payload)
 
     except (json.JSONDecodeError, ValueError, ValidationError):
-        return response(
+        return error_response(
             400,
-            {"message": "Invalid order request."},
+            message="Invalid order request.",
+            error_code="INVALID_ORDER_REQUEST",
         )
 
     order = create_order(
@@ -145,7 +196,11 @@ def handle_get_order(
     )
 
     if order is None:
-        return response(404, {"message": "Order not found."})
+        return error_response(
+            404,
+            message="Order not found.",
+            error_code="ORDER_NOT_FOUND",
+        )
 
     return response(
         200,
@@ -166,14 +221,19 @@ def handle_create_upload_target(
     )
 
     if order is None:
-        return response(404, {"message": "Order not found."})
+        return error_response(
+            404,
+            message="Order not found.",
+            error_code="ORDER_NOT_FOUND",
+        )
 
     raw_body = event.get("body")
 
     if not raw_body:
-        return response(
+        return error_response(
             400,
-            {"message": "Request body is required."},
+            message="Request body is required.",
+            error_code="MISSING_BODY",
         )
 
     try:
@@ -193,9 +253,10 @@ def handle_create_upload_target(
         )
 
     except (json.JSONDecodeError, ValueError, ValidationError):
-        return response(
+        return error_response(
             400,
-            {"message": "Invalid upload request."},
+            message="Invalid upload request.",
+            error_code="INVALID_UPLOAD_REQUEST",
         )
 
     return response(
@@ -222,12 +283,17 @@ def handle_queue_processing(
     )
 
     if order is None:
-        return response(404, {"message": "Order not found."})
+        return error_response(
+            404,
+            message="Order not found.",
+            error_code="ORDER_NOT_FOUND",
+        )
 
     if order.documents.source_s3_key is None:
-        return response(
+        return error_response(
             400,
-            {"message": "Order has no uploaded source CV."},
+            message="Order has no uploaded source CV.",
+            error_code="SOURCE_CV_MISSING",
         )
 
     raw_body = event.get("body")
@@ -244,16 +310,26 @@ def handle_queue_processing(
             request = ProcessOrderRequest()
 
     except (json.JSONDecodeError, ValueError, ValidationError):
-        return response(
+        return error_response(
             400,
-            {"message": "Invalid processing request."},
+            message="Invalid processing request.",
+            error_code="INVALID_PROCESSING_REQUEST",
         )
 
-    message_id = get_processing_queue().enqueue(
-        order_id=order.order_id,
-        job_description=request.job_description,
-        additional_customer_information=(request.additional_customer_information),
-    )
+    try:
+        message_id = enqueue_order_processing(
+            order=order,
+            queue=get_processing_queue(),
+            order_repository=repository,
+            job_description=request.job_description,
+            additional_customer_information=(request.additional_customer_information),
+        )
+    except ValueError as exc:
+        return error_response(
+            409,
+            message=str(exc),
+            error_code="ORDER_ALREADY_PROCESSING",
+        )
 
     return response(
         202,
