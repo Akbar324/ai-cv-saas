@@ -14,6 +14,7 @@ from backend.repositories.dynamodb_order_repository import (
 from backend.repositories.s3_document_repository import (
     S3DocumentRepository,
 )
+from backend.services.processing_queue import SQSProcessingQueue
 
 
 def create_aws_session(settings: AWSSettings) -> Any:
@@ -66,3 +67,26 @@ def create_order_repository(
     )
 
     return DynamoDBOrderRepository(dynamodb.Table(settings.orders_table_name))
+
+
+def create_processing_queue(
+    settings: AWSSettings,
+    *,
+    session: Any | None = None,
+) -> SQSProcessingQueue:
+    """Create the configured SQS processing queue."""
+
+    if settings.processing_queue_url is None:
+        raise ValueError("PROCESSING_QUEUE_URL is required.")
+
+    active_session = session or create_aws_session(settings)
+
+    client = active_session.client(
+        "sqs",
+        region_name=settings.region,
+    )
+
+    return SQSProcessingQueue(
+        queue_url=settings.processing_queue_url,
+        client=client,
+    )

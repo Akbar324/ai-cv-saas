@@ -262,6 +262,7 @@ resource "aws_lambda_function" "api" {
       APP_ENV               = "development"
       DOCUMENTS_BUCKET_NAME = aws_s3_bucket.documents.bucket
       ORDERS_TABLE_NAME     = aws_dynamodb_table.orders.name
+      PROCESSING_QUEUE_URL  = aws_sqs_queue.processing.url
     }
   }
 
@@ -332,4 +333,221 @@ resource "aws_lambda_permission" "api_gateway" {
   principal     = "apigateway.amazonaws.com"
 
   source_arn = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------------------
+# Asynchronous CV processing queue
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "processing_dlq" {
+  name                      = "${local.name_prefix}-processing-dlq"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue" "processing" {
+  name = "${local.name_prefix}-processing"
+
+  visibility_timeout_seconds = 900
+  message_retention_seconds  = 345600
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.processing_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
+data "aws_secretsmanager_secret" "gemini_api_key" {
+  name = "ai-cv-saas/dev/gemini-api-key"
+}
+
+# ---------------------------------------------------------------------------
+# API permission to enqueue processing jobs
+# ---------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "api_lambda_async_permissions" {
+  statement {
+    sid    = "QueueCVProcessing"
+    effect = "Allow"
+
+    actions = [
+      "sqs:SendMessage"
+    ]
+
+    resources = [
+      aws_sqs_queue.processing.arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "api_lambda_async" {
+  name   = "${local.api_lambda_name}-async-processing"
+  role   = aws_iam_role.api_lambda.id
+  policy = data.aws_iam_policy_document.api_lambda_async_permissions.json
+}
+
+# ---------------------------------------------------------------------------
+# Worker Lambda
+# ---------------------------------------------------------------------------
+
+locals {
+  worker_lambda_name = "${local.name_prefix}-worker"
+  worker_zip_path    = "${path.root}/../../../../build/lambda/worker.zip"
+}
+
+resource "aws_cloudwatch_log_group" "worker_lambda" {
+  name              = "/aws/lambda/${local.worker_lambda_name}"
+  retention_in_days = 14
+}
+
+data "aws_iam_policy_document" "worker_assume_role" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+
+    actions = [
+      "sts:AssumeRole"
+    ]
+  }
+}
+
+resource "aws_iam_role" "worker" {
+  name               = "${local.worker_lambda_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.worker_assume_role.json
+}
+
+data "aws_iam_policy_document" "worker_permissions" {
+  statement {
+    sid    = "WorkerLogs"
+    effect = "Allow"
+
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+
+    resources = [
+      "${aws_cloudwatch_log_group.worker_lambda.arn}:*"
+    ]
+  }
+
+  statement {
+    sid    = "Orders"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem"
+    ]
+
+    resources = [
+      aws_dynamodb_table.orders.arn
+    ]
+  }
+
+  statement {
+    sid    = "Documents"
+    effect = "Allow"
+
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject"
+    ]
+
+    resources = [
+      "${aws_s3_bucket.documents.arn}/orders/*"
+    ]
+  }
+
+  statement {
+    sid    = "GeminiSecret"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue"
+    ]
+
+    resources = [
+      data.aws_secretsmanager_secret.gemini_api_key.arn
+    ]
+  }
+
+  statement {
+    sid    = "ConsumeProcessingQueue"
+    effect = "Allow"
+
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes"
+    ]
+
+    resources = [
+      aws_sqs_queue.processing.arn
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "worker" {
+  name   = "${local.worker_lambda_name}-permissions"
+  role   = aws_iam_role.worker.id
+  policy = data.aws_iam_policy_document.worker_permissions.json
+}
+
+resource "aws_lambda_function" "worker" {
+  function_name = local.worker_lambda_name
+  role          = aws_iam_role.worker.arn
+
+  runtime = "python3.12"
+  handler = "backend.app.worker_handler.lambda_handler"
+
+  filename         = local.worker_zip_path
+  source_code_hash = filebase64sha256(local.worker_zip_path)
+
+  architectures = ["x86_64"]
+
+  memory_size = 1024
+  timeout     = 120
+
+  environment {
+    variables = {
+      APP_ENV               = "development"
+      DOCUMENTS_BUCKET_NAME = aws_s3_bucket.documents.bucket
+      ORDERS_TABLE_NAME     = aws_dynamodb_table.orders.name
+
+      AI_PROVIDER  = "gemini"
+      AI_MODEL     = "gemini-3.1-flash-lite"
+      AI_SECRET_ID = data.aws_secretsmanager_secret.gemini_api_key.arn
+    }
+  }
+
+  depends_on = [
+    aws_cloudwatch_log_group.worker_lambda,
+    aws_iam_role_policy.worker
+  ]
+}
+
+resource "aws_lambda_event_source_mapping" "processing" {
+  event_source_arn = aws_sqs_queue.processing.arn
+  function_name    = aws_lambda_function.worker.arn
+
+  batch_size = 1
+
+  function_response_types = [
+    "ReportBatchItemFailures"
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# API processing route
+# ---------------------------------------------------------------------------
+
+resource "aws_apigatewayv2_route" "process_order" {
+  api_id = aws_apigatewayv2_api.api.id
+
+  route_key = "POST /orders/{order_id}/process"
+  target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
 }

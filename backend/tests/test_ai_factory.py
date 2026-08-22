@@ -79,7 +79,11 @@ def test_factory_creates_gemini_provider() -> None:
     assert isinstance(provider, GeminiProvider)
 
 
-def test_factory_requires_gemini_api_key() -> None:
+def test_factory_requires_gemini_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
     settings = AISettings(  # type: ignore[call-arg]
         _env_file=None,
         provider="gemini",

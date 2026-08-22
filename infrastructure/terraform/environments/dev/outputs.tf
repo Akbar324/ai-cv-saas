@@ -27,3 +27,13 @@ output "api_endpoint" {
   description = "DEV API Gateway HTTP API endpoint."
   value       = aws_apigatewayv2_api.api.api_endpoint
 }
+
+output "processing_queue_url" {
+  description = "DEV asynchronous CV processing SQS queue."
+  value       = aws_sqs_queue.processing.url
+}
+
+output "worker_lambda_name" {
+  description = "DEV CV processing worker Lambda."
+  value       = aws_lambda_function.worker.function_name
+}

@@ -32,6 +32,11 @@ class AWSSettings(BaseSettings):
         validation_alias="ORDERS_TABLE_NAME",
         min_length=3,
     )
+    processing_queue_url: str | None = Field(
+        default=None,
+        validation_alias="PROCESSING_QUEUE_URL",
+        min_length=1,
+    )
 
 
 def load_aws_settings() -> AWSSettings:

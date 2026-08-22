@@ -7,9 +7,17 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from backend.models.api import CreateOrderRequest, CreateUploadTargetRequest
+from backend.models.api import (
+    CreateOrderRequest,
+    CreateUploadTargetRequest,
+    ProcessOrderRequest,
+)
 from backend.services.order_service import create_order, get_order
-from backend.services.runtime import get_document_repository, get_order_repository
+from backend.services.runtime import (
+    get_document_repository,
+    get_order_repository,
+    get_processing_queue,
+)
 from backend.services.upload_service import create_source_upload_target
 
 
@@ -52,6 +60,18 @@ def lambda_handler(
             return response(404, {"message": "Route not found."})
 
         return handle_create_upload_target(
+            event,
+            order_id,
+            repository,
+        )
+
+    if method == "POST" and path.endswith("/process"):
+        order_id = path.removeprefix("/orders/").removesuffix("/process").strip("/")
+
+        if not order_id or "/" in order_id:
+            return response(404, {"message": "Route not found."})
+
+        return handle_queue_processing(
             event,
             order_id,
             repository,
@@ -125,10 +145,7 @@ def handle_get_order(
     )
 
     if order is None:
-        return response(
-            404,
-            {"message": "Order not found."},
-        )
+        return response(404, {"message": "Order not found."})
 
     return response(
         200,
@@ -188,5 +205,61 @@ def handle_create_upload_target(
             "upload_url": target.url,
             "fields": target.fields,
             "expires_in_seconds": target.expires_in_seconds,
+        },
+    )
+
+
+def handle_queue_processing(
+    event: dict[str, Any],
+    order_id: str,
+    repository: Any,
+) -> dict[str, Any]:
+    """Handle POST /orders/{order_id}/process."""
+
+    order = get_order(
+        order_id=order_id,
+        repository=repository,
+    )
+
+    if order is None:
+        return response(404, {"message": "Order not found."})
+
+    if order.documents.source_s3_key is None:
+        return response(
+            400,
+            {"message": "Order has no uploaded source CV."},
+        )
+
+    raw_body = event.get("body")
+
+    try:
+        if raw_body:
+            payload = json.loads(raw_body)
+
+            if not isinstance(payload, dict):
+                raise ValueError
+
+            request = ProcessOrderRequest.model_validate(payload)
+        else:
+            request = ProcessOrderRequest()
+
+    except (json.JSONDecodeError, ValueError, ValidationError):
+        return response(
+            400,
+            {"message": "Invalid processing request."},
+        )
+
+    message_id = get_processing_queue().enqueue(
+        order_id=order.order_id,
+        job_description=request.job_description,
+        additional_customer_information=(request.additional_customer_information),
+    )
+
+    return response(
+        202,
+        {
+            "order_id": order.order_id,
+            "processing_status": "queued",
+            "message_id": message_id,
         },
     )

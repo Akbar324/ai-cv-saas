@@ -23,3 +23,13 @@ class CreateUploadTargetRequest(CVBaseModel):
 
     filename: str = Field(min_length=1, max_length=255)
     content_type: str = Field(min_length=1, max_length=150)
+
+
+class ProcessOrderRequest(CVBaseModel):
+    """Optional targeting information supplied when processing starts."""
+
+    job_description: str | None = Field(default=None, max_length=20_000)
+    additional_customer_information: str | None = Field(
+        default=None,
+        max_length=20_000,
+    )
